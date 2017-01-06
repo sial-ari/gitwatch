@@ -43,7 +43,7 @@ shelp () { # Print a message about how to use this script
     echo ""
     echo "Usage:"
     echo "${0##*/} [-s <secs>] [-d <fmt>] [-r <remote> [-b <branch>]]"
-    echo "          [-m <msg>] <target>"
+    echo "          [-m <msg>] [-c <cmd>] <target>"
     echo ""
     echo "Where <target> is the file or folder which should be watched. The target needs"
     echo "to be in a Git repository, or in the case of a folder, it may also be the top"
@@ -73,6 +73,7 @@ shelp () { # Print a message about how to use this script
     echo "                  (unless the <fmt> specified by -d is empty, in which case %d"
     echo "                  is replaced by an empty string); the default message is:"
     echo "                  \"Scripted auto-commit on change (%d) by gitwatch.sh\""
+    echo " -c <cmd>         command to execute instead of plain git for auto-commit"
     echo ""
     echo "As indicated, several conditions are only checked once at launch of the"
     echo "script. You can make changes to the repo state and configurations even while"
@@ -97,6 +98,7 @@ while getopts b:d:hm:p:r:s: option # Process command line options
 do 
     case "${option}" in 
         b) BRANCH=${OPTARG};;
+        c) COMMAND=${OPTARG};;
         d) DATE_FMT=${OPTARG};;
         h) shelp; exit;;
         m) COMMITMSG=${OPTARG};;
@@ -119,9 +121,10 @@ is_command () { # Tests for the availability of a command
 # if custom bin names are given for git or inotifywait, use those; otherwise fall back to "git" and "inotifywait"
 if [ -z "$GW_GIT_BIN" ]; then GIT="git"; else GIT="$GW_GIT_BIN"; fi
 if [ -z "$GW_INW_BIN" ]; then INW="inotifywait"; else INW="$GW_INW_BIN"; fi
+if [ -z "$COMMAND" ]; then COMMAND="$GIT"; fi
 
 # Check availability of selected binaries and die if not met
-for cmd in "$GIT" "$INW"; do
+for cmd in "$COMMAND" "$INW"; do
 	is_command $cmd || { stderr "Error: Required command '$cmd' not found." ; exit 1; }
 done
 unset cmd
@@ -151,7 +154,6 @@ if ! grep "%d" > /dev/null <<< "$COMMITMSG"; then # if commitmsg didnt contain %
 fi
 
 cd $TARGETDIR # CD into right dir
-
 if [ -n "$REMOTE" ]; then # are we pushing to a remote?
     if [ -z "$BRANCH" ]; then # Do we have a branch set to push to ?
         PUSH_CMD="$GIT push $REMOTE" # Branch not set, push to remote without a branch
@@ -176,9 +178,13 @@ while true; do
         FORMATTED_COMMITMSG="$(sed "s/%d/$(date "$DATE_FMT")/" <<< "$COMMITMSG")" # splice the formatted date-time into the commit message
     fi
     cd $TARGETDIR # CD into right dir
-    $GIT add $GIT_ADD_ARGS # add file(s) to index
-    $GIT commit $GIT_COMMIT_ARGS -m"$FORMATTED_COMMITMSG" # construct commit message and commit
+    if [ -n "$COMMAND" ]; then
+      $COMMAND # run custom command instead of the default add, commit and push 
+    else
+      $GIT add $GIT_ADD_ARGS # add file(s) to index
+      $GIT commit $GIT_COMMIT_ARGS -m"$FORMATTED_COMMITMSG" # construct commit message and commit
 
-    if [ -n "$PUSH_CMD" ]; then $PUSH_CMD; fi
+      if [ -n "$PUSH_CMD" ]; then $PUSH_CMD; fi
+    fi
 done
 
